@@ -1,0 +1,46 @@
+
+- name: Télécharger le manifeste Calico
+  get_url:
+    url: https://raw.githubusercontent.com/projectcalico/calico/master/manifests/calico.yaml
+    dest: /tmp/calico.yaml
+
+- name: Vérifier si le fichier admin.conf existe
+  stat:
+    path: /etc/kubernetes/admin.conf
+  register: cluster_init
+
+- name: Initialiser le cluster Kubernetes sinon
+  command: "kubeadm init --apiserver-advertise-address={{ server_ip }} --pod-network-cidr={{ pod_network_cidr }}"
+  register: kubeadm_output
+  when: not cluster_init.stat.exists
+
+- name: Extraire le token et le hash
+  add_host:
+    name: join_node
+    token: "{{ kubeadm_output.stdout | regex_search('token ([^\\s]+)') }}"
+    hash: "{{ kubeadm_output.stdout | regex_search('sha256:([^\\s]+)') }}"
+  when: not cluster_init.stat.exists
+
+- name: Créer le répertoire .kube
+  file:
+    path: "{{ ansible_env.HOME }}/.kube"
+    state: directory
+  when: not cluster_init.stat.exists
+
+- name: Copier le fichier de configuration kube
+  copy:
+    src: /etc/kubernetes/admin.conf
+    dest: "{{ ansible_env.HOME }}/.kube/config"
+    remote_src: yes
+  when: not cluster_init.stat.exists
+
+- name: Définir le propriétaire et le groupe du fichier de configuration kube
+  file:
+    path: "{{ ansible_env.HOME }}/.kube/config"
+    owner: "{{ ansible_user_id }}"
+    group: "{{ ansible_user_id }}"
+  when: not cluster_init.stat.exists
+
+- name: Appliquer le manifeste Calico
+  command: kubectl apply -f /tmp/calico.yaml
+  when: not cluster_init.stat.exists

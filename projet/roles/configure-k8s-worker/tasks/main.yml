@@ -1,0 +1,3 @@
+ 
+- name: Joindre les noeuds workers au cluster k8s
+  shell: kubeadm join {{ server_ip }}:6443 --{{ hostvars['join_node']['token'] }} --discovery-token-ca-cert-hash {{ hostvars['join_node']['hash'] }}

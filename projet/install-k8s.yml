@@ -1,0 +1,23 @@
+---
+- name: Installer les dépendances kubernetes sur tous les noeuds
+  hosts: all
+  become: yes
+  roles:
+    - install-k8s-package
+
+- name: Configuer un cluster Kubernetes
+  hosts: master
+  vars:
+    server_ip: "192.168.56.31"
+    pod_network_cidr: "10.10.0.0/16"
+  become: yes
+  roles:
+    - init-k8s-cluster
+
+- name: Joindre les noeuds workers au cluster Kubernetes
+  hosts: worker
+  become: yes
+  vars:
+    server_ip: "192.168.56.31"
+  roles:
+    - configure-k8s-worker

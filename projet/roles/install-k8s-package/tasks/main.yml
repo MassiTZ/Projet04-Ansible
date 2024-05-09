@@ -1,0 +1,137 @@
+
+- name: Désactiver la mémoire swap
+  command: swapoff -a
+
+- name: Charger les modules overlay et br_netfilter
+  modprobe:
+    name: "{{ item }}"
+  with_items:
+    - overlay
+    - br_netfilter
+
+- name: Configurer les modules overlay et br_netfilter pour k8s
+  copy:
+    dest: /etc/modules-load.d/k8s.conf
+    content: |
+      overlay
+
+      br_netfilter
+
+- name: Configurer les paquets réseau pour k8s
+  sysctl:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    state: present
+    sysctl_set: yes
+  with_items:
+    - { name: 'net.bridge.bridge-nf-call-iptables', value: 1 }
+    - { name: 'net.bridge.bridge-nf-call-ip6tables', value: 1 }
+    - { name: 'net.ipv4.ip_forward', value: 1 }
+
+- name: Maj des paquets [1]
+  apt:
+    update_cache: yes
+
+- name: Télécharger la clé gpg Docker
+  get_url:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    dest: /etc/apt/keyrings/docker-apt-keyring.asc
+    mode: "0644"
+    force: true
+
+- name: Ajouter le référentiel Docker
+  apt_repository:
+    repo: "deb [arch={{ 'amd64' if ansible_architecture == 'x86_64' else 'arm64' }} signed-by=/etc/apt/keyrings/docker-apt-keyring.asc] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+    state: present
+    update_cache: yes
+
+- name: Maj des paquets [2]
+  apt:
+    update_cache: yes
+
+- name: Installer containerd
+  apt:
+    name: containerd.io
+    state: present
+
+- name: Créer le répertoire /etc/containerd s'il n'existe pas
+  file:
+    path: /etc/containerd
+    state: directory
+
+- name: Générer la configuration par défaut de containerd
+  command: containerd config default
+  register: containerd_config_output
+
+- name: Sauvegarder la configuration de containerd dans le fichier config.toml
+  copy:
+    content: "{{ containerd_config_output.stdout }}"
+    dest: /etc/containerd/config.toml
+
+- name: Modifier le fichier de configuration pour activer SystemdCgroup
+  replace:
+    path: /etc/containerd/config.toml
+    regexp: 'SystemdCgroup = false'
+    replace: 'SystemdCgroup = true'
+
+- name: Redémarrer le service containerd
+  systemd:
+    name: containerd
+    state: restarted
+
+
+- name: Maj des paquets [3]
+  apt:
+    update_cache: yes
+
+- name: Installer les dépendances Kubernetes
+  apt:
+    name:
+      - apt-transport-https
+      - ca-certificates
+    state: present
+
+- name: télécharger la cle gpg k8s
+  get_url:
+    url: https://pkgs.k8s.io/core:/stable:/v1.30/deb/Release.key
+    dest: /etc/apt/keyrings/kubernetes-apt-keyring.asc
+    mode: "0644"
+    force: true
+
+- name: Ajouter le référentiel Kubernetes
+  apt_repository:
+    repo: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.asc] https://pkgs.k8s.io/core:/stable:/v1.30/deb/ /"
+    state: present
+    update_cache: yes
+  
+- name: Maj des paquets [4]
+  apt:
+    update_cache: yes
+
+- name: Install kubelet, kubeadm et kubectl
+  apt:
+    name:
+      - kubelet
+      - kubeadm
+      - kubectl
+    state: present
+
+- name: Marquer kubelet, kubeadm, kubectl et containerd
+  dpkg_selections:
+    name: "{{ item }}"
+    selection: hold
+  with_items:
+    - kubelet
+    - kubeadm
+    - kubectl
+    - containerd
+
+
+- name: Activer les services kubelet et containerd
+  systemd:
+    name: "{{ item }}"
+    enabled: yes
+    state: started
+  with_items:
+    - kubelet.service
+    - containerd.service
